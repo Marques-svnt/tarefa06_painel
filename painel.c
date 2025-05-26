@@ -22,7 +22,6 @@
 #define VERDE 11
 #define AZUL 12
 #define VERMELHO 13
-#define BUZZER 21
 
 // Semáforos
 SemaphoreHandle_t xSemEntrada;
@@ -32,10 +31,12 @@ SemaphoreHandle_t xContadorSem;
 SemaphoreHandle_t xOledMutex;
 
 // Variaveis globais
+bool display_inicializado = false;
 volatile unsigned int MAX = 9;
 uint16_t usuarios_atual = 0;
 bool usuario_saiu;
 unsigned int usuarios_atual_reset;
+static unsigned int previous_count_for_display = 0;
 static volatile uint32_t last_time_A = 0; // Armazena o tempo do último evento (em microssegundos)
 static volatile uint32_t last_time_B = 0;
 static volatile uint32_t last_time_JB = 0;
@@ -88,6 +89,81 @@ void gpio_irq_handler(uint gpio, uint32_t events)
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
+void update_count(unsigned int count, unsigned int capacity)
+{
+    // Nenhum usuário -> Azul
+    if (count == 0)
+    {
+        gpio_put(VERDE, 0);
+        gpio_put(AZUL, 1);
+        gpio_put(VERMELHO, 0);
+
+        set_one_led(count, 0, 0, 20);
+    }
+    // Mais que 1 usuário e menos que o máximo - 2 -> Verde
+    else if (count <= (capacity - 2))
+    {
+        gpio_put(VERDE, 1);
+        gpio_put(AZUL, 0);
+        gpio_put(VERMELHO, 0);
+        set_one_led(count, 0, 20, 0);
+    }
+    // Apenas uma vaga restante -> Amarelo
+    else if (count == (capacity - 1))
+    {
+        gpio_put(VERDE, 1);
+        gpio_put(AZUL, 0);
+        gpio_put(VERMELHO, 1);
+        set_one_led(count, 20, 10, 0);
+    }
+    // Sem vagas -> Vermelho
+    else if (count == capacity)
+    {
+        gpio_put(VERDE, 0);
+        gpio_put(AZUL, 0);
+        gpio_put(VERMELHO, 1);
+        set_one_led(count, 20, 0, 0);
+    }
+
+    // Função para atualização do display protegido por mutex
+    // Determina a mudança para a lógica do display ---
+    bool count_aumentou = (count > previous_count_for_display);
+    bool count_diminuiu = (count < previous_count_for_display);
+    if (xOledMutex != NULL && xSemaphoreTake(xOledMutex, portMAX_DELAY) == pdTRUE)
+    {
+        char vagas[20];
+
+        sprintf(vagas, "0%u/0%u", count, capacity);
+
+        if (count == 0)
+        {
+            limpar();
+            interface_display("Lab Vazio", vagas);
+        }
+        else if (count == capacity)
+        {
+            sprintf(vagas, "0%u/0%u ()", count, capacity); // () = sinal de alerta
+            limpar();
+            interface_display("Lab Cheio", vagas);
+        }
+        else
+        {
+            if (count_aumentou)
+            {
+                limpar();
+                interface_display("Pessoa entrou", vagas);
+            }
+            else if (count_diminuiu)
+            {
+                limpar();
+                interface_display("Pessoa saiu", vagas);
+            }
+        }
+        previous_count_for_display = count;
+        xSemaphoreGive(xOledMutex);
+    }
+}
+
 void init()
 {
     stdio_init_all();
@@ -120,56 +196,20 @@ void init()
 
     gpio_init(VERMELHO);
     gpio_set_dir(VERMELHO, GPIO_OUT);
-
-    // estado inicial para o sistema inicializado
-    gpio_put(VERDE, 0);
-    gpio_put(AZUL, 1);
-    gpio_put(VERMELHO, 0);
-    set_one_led(0, 0, 0, 20);
-}
-
-void update_rgb(unsigned int count, unsigned int capacity)
-{
-    // Nenhum usuário -> Azul
-    if (count == 0)
-    {
-        gpio_put(VERDE, 0);
-        gpio_put(AZUL, 1);
-        gpio_put(VERMELHO, 0);
-        set_one_led(count, 0, 0, 20);
-    }
-    // Mais que 1 usuário e menos que o máximo - 2 -> Verde
-    else if (count <= (capacity - 2))
-    {
-        gpio_put(VERDE, 1);
-        gpio_put(AZUL, 0);
-        gpio_put(VERMELHO, 0);
-        set_one_led(count, 0, 20, 0);
-    }
-    // Apenas uma vaga restante -> Amarelo
-    else if (count == (capacity - 1))
-    {
-        gpio_put(VERDE, 1);
-        gpio_put(AZUL, 0);
-        gpio_put(VERMELHO, 1);
-        set_one_led(count, 20, 10, 0);
-    }
-    // Sem vagas -> Vermelho
-    else if (count == capacity)
-    {
-        gpio_put(VERDE, 0);
-        gpio_put(AZUL, 0);
-        gpio_put(VERMELHO, 1);
-        set_one_led(count, 20, 0, 0);
-    }
-
-    // Adicionar lógica de matriz
 }
 
 // ----- Tarefas do FreeRTOS -----
 
 void vTaskEntrada(void *pvParameters)
 {
+    // Executa a atualização inicial do display APENAS UMA VEZ
+    if (!display_inicializado)
+    {
+        // 'usuarios_atual' é global e deve ser 0 no início.
+        // 'MAX' também é global.
+        update_count(usuarios_atual, MAX);
+        display_inicializado = true;
+    }
     while (1)
     {
         // Aguarda o sinal do botão A
@@ -183,24 +223,12 @@ void vTaskEntrada(void *pvParameters)
                 usuarios_atual++;
                 taskEXIT_CRITICAL();
 
-                if (xSemaphoreTake(xOledMutex, portMAX_DELAY) == pdTRUE)
-                {
-                    char status_msg[20];
-                    sprintf(status_msg, "Vagas: %u", MAX - usuarios_atual); // Exibe vagas restantes no display
-                    // oled_show_status(usuarios_atual, MAX, "Entrada Permitida", status_msg);
-                    xSemaphoreGive(xOledMutex);
-                }
-
-                update_rgb(usuarios_atual, MAX);
+                // Atualiza o led, display e matriz para indicar o incremento
+                update_count(usuarios_atual, MAX);
             }
             else
             {
                 // Se não há vaga
-                if (xSemaphoreTake(xOledMutex, portMAX_DELAY) == pdTRUE)
-                {
-                    // oled_show_status(usuarios_atual, MAX, "Sistema LOTADO!", "");
-                    xSemaphoreGive(xOledMutex);
-                }
                 // Beep curto
                 buzz(100);
                 vTaskDelay(100);
@@ -234,29 +262,14 @@ void vTaskSaida(void *pvParameters)
                 // Devolve uma vaga ao semáforo de contagem
                 xSemaphoreGive(xContadorSem);
 
-                // Atualiza o display OLED (protegido por mutex)
-                if (xSemaphoreTake(xOledMutex, portMAX_DELAY) == pdTRUE)
-                {
-                    char status_msg[20];
-                    sprintf(status_msg, "Vagas: %u", MAX - usuarios_atual);
-                    // oled_show_status(usuarios_atual, MAX, "Saida Registrada", status_msg);
-                    xSemaphoreGive(xOledMutex);
-                }
-
-                // Atualiza o LED RGB para indicar a nova ocupação
-                update_rgb(usuarios_atual, MAX);
+                // Atualiza o LED RGB, a matriz e o display para indicar a nova ocupação
+                update_count(usuarios_atual, MAX);
             }
             else
             {
                 // Se não houve decremento
-
                 // Informar no painel que não há nínguém
-                if (xSemaphoreTake(xOledMutex, portMAX_DELAY) == pdTRUE)
-                {
-                    // oled_show_status(usuarios_atual, MAX, "Ninguem no local", "");
-                    xSemaphoreGive(xOledMutex);
-                }
-                update_rgb(usuarios_atual, MAX);
+                update_count(usuarios_atual, MAX);
             }
         }
     }
@@ -294,16 +307,8 @@ void vTaskReset(void *pvParameters)
             vTaskDelay(pdMS_TO_TICKS(100));
             buzzer_stop();
 
-            // 5. Atualiza o display OLED (protegido por mutex)
-            if (xSemaphoreTake(xOledMutex, portMAX_DELAY) == pdTRUE)
-            {
-                char status_msg[20];
-                sprintf(status_msg, "Vagas: %u", MAX); // Todas as vagas disponíveis
-                // oled_show_status(usuarios_atual, MAX, "Sistema Resetado", status_msg);
-                xSemaphoreGive(xOledMutex);
-            }
-
-            update_rgb(usuarios_atual, MAX); // Com usuarios_atual = 0, deve ficar Azul
+            // Atualiza a matriz, led e display para o estado de reset
+            update_count(usuarios_atual, MAX); // Com usuarios_atual = 0, deve ficar Azul
         }
     }
 }

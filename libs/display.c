@@ -13,7 +13,6 @@
 #define I2C_SCL 15
 #define endereco 0x3C
 
-
 bool cor = true;
 ssd1306_t ssd;
 
@@ -58,5 +57,25 @@ void flush_display(void)
 void limpar()
 {
     ssd1306_fill(&ssd, false);
+    ssd1306_send_data(&ssd);
+}
+
+void interface_display(const char *texto,const char *vagas)
+{
+    ssd1306_fill(&ssd, false);
+    ssd1306_send_data(&ssd);
+
+    ssd1306_rect(&ssd, 3, 3, 122, 58, cor, !cor); // Retângulo maior
+
+    ssd1306_rect(&ssd, 3, 3, 122, 18, cor, !cor); // Retângulo de cima (nome do lab)
+    ssd1306_rect(&ssd, 3, 3, 122, 19, cor, !cor);
+
+    ssd1306_rect(&ssd, 3, 3, 122, 40, cor, !cor); // Retângulo de baixo (vagas)
+    ssd1306_rect(&ssd, 3, 3, 122, 39, cor, !cor);
+
+    ssd1306_draw_string(&ssd, "LAMAN", 44, 8);
+    ssd1306_draw_string(&ssd, texto, 10, 28);
+    ssd1306_draw_string(&ssd, vagas, 10, 48);
+
     ssd1306_send_data(&ssd);
 }
