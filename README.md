@@ -104,10 +104,8 @@ Este projeto implementa um **painel de controle interativo** para simular o gere
 
 ## Vídeo de Demonstração
 
-🎥 [Link para o vídeo de demonstração do projeto](SEU_LINK_AQUI)
-*(Substitua SEU_LINK_AQUI pelo link real do seu vídeo no YouTube, Google Drive, etc.)*
+🎥 [Link para o vídeo de demonstração do projeto]((https://www.youtube.com/watch?v=pdR5pkuVFnI))
 
 ## Licença
 
 Este projeto pode ser utilizado livremente para fins educacionais e não comerciais.
-Créditos: `<Seu Nome Aqui>`
