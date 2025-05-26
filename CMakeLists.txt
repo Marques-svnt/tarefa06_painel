@@ -28,11 +28,13 @@ pico_sdk_init()
 
 include_directories(${CMAKE_SOURCE_DIR}/libs)
 
+
 add_executable(painel  
         painel.c
         libs/ssd1306.c # Biblioteca para o display OLED
         libs/display.c # Biblioteca para controle do display
         libs/buzzer.c  # Biblioteca para buzzer
+        libs/pio.c
         )
 
 target_include_directories(painel PRIVATE ${CMAKE_SOURCE_DIR})
@@ -44,7 +46,10 @@ target_link_libraries(painel
         FreeRTOS-Kernel 
         FreeRTOS-Kernel-Heap4
         hardware_pwm
+        hardware_pio
         )
+
+pico_generate_pio_header(painel ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
 
 pico_enable_stdio_usb(painel 1)
 pico_enable_stdio_uart(painel 0)
